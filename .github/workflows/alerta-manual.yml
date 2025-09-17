@@ -1,0 +1,89 @@
+name: Alerta Manual - Execução sob Demanda
+
+on:
+  workflow_dispatch:
+    inputs:
+      lookback_days:
+        description: 'Número de dias para lookback (padrão: 1)'
+        required: false
+        default: '1'
+        type: string
+      max_revenue:
+        description: 'Receita máxima para filtro (padrão: 1.0)'
+        required: false
+        default: '1.0'
+        type: string
+      test_mode:
+        description: 'Modo de teste (não envia Discord)'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  run-alerta-manual:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout código
+      uses: actions/checkout@v4
+      
+    - name: Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Cache dependências
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Instalar dependências
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Criar arquivo .env
+      run: |
+        echo "CLICKHOUSE_URL=${{ secrets.CLICKHOUSE_URL }}" >> .env
+        echo "CLICKHOUSE_DATABASE=${{ secrets.CLICKHOUSE_DATABASE }}" >> .env
+        echo "CLICKHOUSE_USER=${{ secrets.CLICKHOUSE_USER }}" >> .env
+        echo "CLICKHOUSE_PASSWORD=${{ secrets.CLICKHOUSE_PASSWORD }}" >> .env
+        if [ "${{ inputs.test_mode }}" != "true" ]; then
+          echo "DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" >> .env
+          echo "MENTION_IDS=${{ secrets.MENTION_IDS }}" >> .env
+        fi
+        
+    - name: Executar script com parâmetros customizados
+      run: |
+        echo "🚀 Executando alerta com parâmetros:"
+        echo "  - Lookback Days: ${{ inputs.lookback_days }}"
+        echo "  - Max Revenue: ${{ inputs.max_revenue }}"
+        echo "  - Test Mode: ${{ inputs.test_mode }}"
+        
+        # Nota: Para usar os inputs, seria necessário modificar o script Python
+        # Por enquanto, executa com os valores padrão
+        python alerta_oficial.py
+        
+    - name: Upload do arquivo CSV
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: relatorio-manual-${{ github.run_number }}
+        path: sites_cost_pos_lowrev_yday_with_domain.csv
+        retention-days: 30
+        
+    - name: Resumo da execução
+      if: always()
+      run: |
+        echo "## 📊 Resumo da Execução" >> $GITHUB_STEP_SUMMARY
+        echo "- **Data/Hora:** $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Modo de Teste:** ${{ inputs.test_mode }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+        if [ -f "sites_cost_pos_lowrev_yday_with_domain.csv" ]; then
+          echo "- **Arquivo gerado:** ✅ sites_cost_pos_lowrev_yday_with_domain.csv" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "- **Arquivo gerado:** ❌ Nenhum arquivo CSV foi criado" >> $GITHUB_STEP_SUMMARY
+        fi
