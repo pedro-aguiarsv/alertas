@@ -173,22 +173,48 @@ def main():
         GROUP BY c.site_id
     """
 
-    # --- Junta revenue x cost; depois junta o domínio (ontem ou fallback 7d) ---
+    # --- QUERY MELHORADA: Garante que sites com custo mas sem revenue sejam capturados ---
     final_sql = f"""
-        WITH joined AS (
+        WITH cost_sites AS (
+            -- Todos os sites com custo > 0
             SELECT
-              coalesce(rs.site_id, cs.site_id) AS site_id,
-              coalesce(rs.revenue_latest, 0)   AS revenue,
-              coalesce(cs.cost_latest, 0)      AS cost,
+              c.site_id,
+              sum(c.metrics_cost) / {COST_DIVISOR} AS cost_latest
+            FROM {db}.{DB_TABLE_COST} AS c
+            INNER JOIN ({cost_latest_ts_sql}) AS cl
+              ON c.site_id = cl.site_id
+             AND toTimeZone(toDateTime(c.timestamp), '{TZ}') = cl.ts_cost_latest_sp
+            WHERE toDate(toTimeZone(toDateTime(c.timestamp), '{TZ}')) = toDate('{yday_sp}')
+            GROUP BY c.site_id
+            HAVING cost_latest > 0
+        ),
+        revenue_sites AS (
+            -- Sites com revenue (pode ser 0 se não há registros)
+            SELECT
+              r.site_id,
+              argMax(r.domain, toTimeZone(toDateTime(r.timestamp), '{TZ}')) AS domain_yday,
+              sum(r.ad_exchange_line_item_level_revenue) / {REVENUE_DIVISOR} AS revenue_latest
+            FROM {db}.{DB_TABLE_REVENUE} AS r
+            INNER JOIN ({rev_latest_ts_sql}) AS rl
+              ON r.site_id = rl.site_id
+             AND toTimeZone(toDateTime(r.timestamp), '{TZ}') = rl.ts_rev_latest_sp
+            WHERE toDate(r.date) = toDate('{yday_sp}')
+            GROUP BY r.site_id
+        ),
+        joined AS (
+            SELECT
+              cs.site_id,
+              cs.cost_latest AS cost,
+              coalesce(rs.revenue_latest, 0) AS revenue,  -- Sites sem revenue = 0
               rs.domain_yday
-            FROM ({rev_sum_sql}) AS rs
-            FULL OUTER JOIN ({cost_sum_sql}) AS cs
-              ON rs.site_id = cs.site_id
+            FROM cost_sites cs
+            LEFT JOIN revenue_sites rs  -- LEFT JOIN garante que sites com custo mas sem revenue apareçam
+              ON cs.site_id = rs.site_id
         ),
         with_domain AS (
             SELECT
               j.site_id,
-              coalesce(j.domain_yday, df.domain_recent) AS domain,
+              coalesce(j.domain_yday, df.domain_recent, 'unknown') AS domain,
               j.cost,
               j.revenue
             FROM joined j
@@ -199,9 +225,93 @@ def main():
         FROM with_domain
         WHERE cost > 0
           AND revenue <= {MAX_REVENUE}
-          {"AND site_id <> 0" if True else ""}
-        ORDER BY site_id
+          {"AND site_id <> 0" if FILTER_SITE_ID0 else ""}
+        ORDER BY revenue ASC, cost DESC
     """
+
+    # DEBUGGING: Vamos executar queries separadas para entender o problema
+    print("🔍 DEBUGGING: Analisando dados separadamente...")
+    
+    # Query 1: Sites com custo > 0 (independente de revenue)
+    debug_cost_sql = f"""
+        SELECT 
+            site_id,
+            sum(metrics_cost) / {COST_DIVISOR} AS cost_latest
+        FROM {db}.{DB_TABLE_COST}
+        WHERE toDate(toTimeZone(toDateTime(timestamp), '{TZ}')) = toDate('{yday_sp}')
+        GROUP BY site_id
+        HAVING cost_latest > 0
+        ORDER BY cost_latest DESC
+        LIMIT 10
+    """
+    
+    try:
+        debug_cost_df = client.query_df(debug_cost_sql)
+        print(f"📊 Sites com custo > 0: {len(debug_cost_df)}")
+        if not debug_cost_df.empty:
+            print("   Top 10 sites com maior custo:")
+            for _, row in debug_cost_df.head(10).iterrows():
+                print(f"   - Site {row['site_id']}: custo = {row['cost_latest']:.2f}")
+    except Exception as e:
+        print(f"❌ ERRO na query de debug de custo: {e}")
+    
+    # Query 2: Sites com revenue <= MAX_REVENUE (incluindo 0)
+    debug_rev_sql = f"""
+        SELECT 
+            site_id,
+            sum(ad_exchange_line_item_level_revenue) / {REVENUE_DIVISOR} AS revenue_latest
+        FROM {db}.{DB_TABLE_REVENUE}
+        WHERE toDate(date) = toDate('{yday_sp}')
+        GROUP BY site_id
+        HAVING revenue_latest <= {MAX_REVENUE}
+        ORDER BY revenue_latest ASC
+        LIMIT 10
+    """
+    
+    try:
+        debug_rev_df = client.query_df(debug_rev_sql)
+        print(f"📊 Sites com revenue <= {MAX_REVENUE}: {len(debug_rev_df)}")
+        if not debug_rev_df.empty:
+            print("   Top 10 sites com menor revenue:")
+            for _, row in debug_rev_df.head(10).iterrows():
+                print(f"   - Site {row['site_id']}: revenue = {row['revenue_latest']:.6f}")
+    except Exception as e:
+        print(f"❌ ERRO na query de debug de revenue: {e}")
+    
+    # Query 3: Sites com custo MAS SEM revenue (o problema que você mencionou)
+    debug_cost_no_rev_sql = f"""
+        WITH cost_sites AS (
+            SELECT site_id, sum(metrics_cost) / {COST_DIVISOR} AS cost_latest
+            FROM {db}.{DB_TABLE_COST}
+            WHERE toDate(toTimeZone(toDateTime(timestamp), '{TZ}')) = toDate('{yday_sp}')
+            GROUP BY site_id
+            HAVING cost_latest > 0
+        ),
+        rev_sites AS (
+            SELECT site_id
+            FROM {db}.{DB_TABLE_REVENUE}
+            WHERE toDate(date) = toDate('{yday_sp}')
+            GROUP BY site_id
+        )
+        SELECT cs.site_id, cs.cost_latest
+        FROM cost_sites cs
+        LEFT JOIN rev_sites rs ON cs.site_id = rs.site_id
+        WHERE rs.site_id IS NULL  -- Sites com custo mas SEM registros de revenue
+        ORDER BY cs.cost_latest DESC
+        LIMIT 10
+    """
+    
+    try:
+        debug_cost_no_rev_df = client.query_df(debug_cost_no_rev_sql)
+        print(f"🎯 Sites com CUSTO mas SEM revenue: {len(debug_cost_no_rev_df)}")
+        if not debug_cost_no_rev_df.empty:
+            print("   Sites problemáticos (custo > 0, sem revenue):")
+            for _, row in debug_cost_no_rev_df.head(10).iterrows():
+                print(f"   - Site {row['site_id']}: custo = {row['cost_latest']:.2f}, revenue = 0 (sem registros)")
+        else:
+            print("   ✅ Todos os sites com custo têm registros de revenue")
+    except Exception as e:
+        print(f"❌ ERRO na query de debug custo sem revenue: {e}")
 
     print("🔍 Executando query principal...")
     try:
