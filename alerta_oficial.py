@@ -91,13 +91,34 @@ def send_discord_alert(webhook_url: str, df: pd.DataFrame, report_date: str, men
 
 
 def main():
-    config = get_db_config()
-    client = get_client_db(config)
+    print("🚀 Iniciando execução do script de alertas...")
+    
+    try:
+        config = get_db_config()
+        print("✅ Configurações carregadas com sucesso")
+        print(f"   - Database: {config['db']}")
+        print(f"   - Webhook configurado: {'Sim' if config['webhook_url'] else 'Não'}")
+    except Exception as e:
+        print(f"❌ ERRO ao carregar configurações: {e}")
+        raise
+    
+    try:
+        client = get_client_db(config)
+        print("✅ Conexão com banco estabelecida")
+    except Exception as e:
+        print(f"❌ ERRO ao conectar com banco: {e}")
+        raise
+        
     db = config["db"]
     
     today_sp = datetime.now(ZoneInfo(TZ)).date()
     yday_sp  = (today_sp - timedelta(days=1)).strftime("%Y-%m-%d")
     start_lb = (today_sp - timedelta(days=LOOKBACK_DAYS)).strftime("%Y-%m-%d")
+    
+    print(f"📅 Datas calculadas:")
+    print(f"   - Hoje (SP): {today_sp}")
+    print(f"   - Ontem (SP): {yday_sp}")
+    print(f"   - Lookback start: {start_lb}")
 
     # --- Revenue (GAM) — último timestamp DENTRO de ontem por site ---
     rev_latest_ts_sql = f"""
@@ -182,25 +203,71 @@ def main():
         ORDER BY site_id
     """
 
-    df = client.query_df(final_sql) # Usei a sugestão de melhoria para carregar direto no DF
+    print("🔍 Executando query principal...")
+    try:
+        df = client.query_df(final_sql) # Usei a sugestão de melhoria para carregar direto no DF
+        print(f"✅ Query executada com sucesso. Linhas retornadas: {len(df)}")
+    except Exception as e:
+        print(f"❌ ERRO ao executar query: {e}")
+        raise
 
+    # Sempre criar o arquivo CSV, mesmo que vazio
+    csv_path = Path(__file__).with_name(OUT_CSV)
+    
     if not df.empty:
+        print("📊 Processando dados encontrados...")
         if FILTER_SITE_ID0:
+            df_before = len(df)
             df = df[df["site_id"] != 0].reset_index(drop=True)
+            print(f"   - Filtrados {df_before - len(df)} sites com site_id=0")
+        
         df["cost"] = df["cost"].astype(float).round(2)
         df["revenue"] = df["revenue"].astype(float).round(6)
+        print(f"   - Dados processados: {len(df)} sites")
 
-    print(f"Sites com COST>0 e REVENUE<= {MAX_REVENUE} (ontem): {len(df)}")
+    print(f"📈 Sites com COST>0 e REVENUE<= {MAX_REVENUE} (ontem): {len(df)}")
+    
+    # SEMPRE salvar o CSV (mesmo que vazio para debugging)
+    try:
+        df.to_csv(csv_path, index=False)
+        print(f"✅ Arquivo CSV salvo: {OUT_CSV} ({len(df)} linhas)")
+    except Exception as e:
+        print(f"❌ ERRO ao salvar CSV: {e}")
+        # Criar um CSV vazio em caso de erro
+        with open(csv_path, 'w') as f:
+            f.write("site_id,domain,cost,revenue\n")
+        print(f"⚠️  CSV vazio criado para debugging")
+    
     if not df.empty:
+        print("📋 Primeiros 15 resultados:")
         print(df.head(15))
-        df.to_csv(Path(__file__).with_name(OUT_CSV), index=False)
-        print(f"Arquivo salvo: {OUT_CSV}")
-
+        
         # MODIFICADO: A chamada da função agora passa os IDs de menção
         send_discord_alert(config["webhook_url"], df, yday_sp, config["mention_ids"])
     else:
-        print("Nenhum site encontrado com os critérios definidos. Nenhum alerta enviado.")
+        print("ℹ️  Nenhum site encontrado com os critérios definidos.")
+        print("   - Isso pode ser normal se não há sites problemáticos")
+        print("   - Arquivo CSV vazio foi criado para referência")
+        print("   - Nenhum alerta enviado para Discord")
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+        print("🎉 Script executado com sucesso!")
+    except Exception as e:
+        print(f"💥 ERRO CRÍTICO: {e}")
+        print("📋 Detalhes do erro:")
+        import traceback
+        traceback.print_exc()
+        
+        # Criar um arquivo CSV vazio para o workflow não falhar
+        try:
+            csv_path = Path(__file__).with_name(OUT_CSV)
+            with open(csv_path, 'w') as f:
+                f.write("site_id,domain,cost,revenue\n")
+            print(f"⚠️  CSV vazio criado devido ao erro: {OUT_CSV}")
+        except:
+            print("❌ Não foi possível criar nem mesmo um CSV vazio")
+        
+        exit(1)

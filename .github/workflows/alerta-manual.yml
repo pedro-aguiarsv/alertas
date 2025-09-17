@@ -56,16 +56,42 @@ jobs:
           echo "MENTION_IDS=${{ secrets.MENTION_IDS }}" >> .env
         fi
         
+    - name: Verificar ambiente antes da execução
+      run: |
+        echo "🔍 Verificando ambiente:"
+        echo "  - Python version: $(python --version)"
+        echo "  - Pip packages:"
+        pip list
+        echo "  - Arquivos no diretório:"
+        ls -la
+        echo "  - Variáveis de ambiente (sem valores sensíveis):"
+        env | grep -E "^(GITHUB_|RUNNER_)" | head -10
+        
     - name: Executar script com parâmetros customizados
       run: |
         echo "🚀 Executando alerta com parâmetros:"
         echo "  - Lookback Days: ${{ inputs.lookback_days }}"
         echo "  - Max Revenue: ${{ inputs.max_revenue }}"
         echo "  - Test Mode: ${{ inputs.test_mode }}"
+        echo ""
+        echo "📋 Iniciando execução do script..."
         
         # Nota: Para usar os inputs, seria necessário modificar o script Python
         # Por enquanto, executa com os valores padrão
         python alerta_oficial.py
+        
+    - name: Verificar arquivos gerados
+      if: always()
+      run: |
+        echo "📁 Verificando arquivos após execução:"
+        ls -la
+        if [ -f "sites_cost_pos_lowrev_yday_with_domain.csv" ]; then
+          echo "✅ CSV encontrado!"
+          echo "📊 Conteúdo do CSV:"
+          head -10 sites_cost_pos_lowrev_yday_with_domain.csv
+        else
+          echo "❌ CSV não encontrado!"
+        fi
         
     - name: Upload do arquivo CSV
       uses: actions/upload-artifact@v4
