@@ -62,14 +62,14 @@ def send_discord_alert(webhook_url: str, df: pd.DataFrame, report_date: str, men
         return
 
     num_sites = len(df)
-    preview_data = df.head(10).to_string(index=False)
+    preview_data = df.head(50).to_string(index=False)
 
     embed = {
         "title": "🚨 Alerta: Sites com Custo e Baixa Receita",
         "color": 15158332, # Vermelho
         "description": f"Foram encontrados **{num_sites} sites** com `custo > 0` e `receita <= {MAX_REVENUE}` para a data de **{report_date}**.",
         "fields": [
-            {"name": "Amostra dos Dados (até 10 sites):", "value": f"```\n{preview_data}\n```"},
+            {"name": "Amostra dos Dados (até 50 sites):", "value": f"```\n{preview_data}\n```"},
             {"name": "Relatório Completo", "value": f"A lista completa foi salva no arquivo: `{OUT_CSV}`"}
         ]
     }
