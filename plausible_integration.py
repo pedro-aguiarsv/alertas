@@ -28,7 +28,6 @@ def get_db_config():
         "usr": os.getenv("CLICKHOUSE_USER"),
         "pwd": os.getenv("CLICKHOUSE_PASSWORD"),
         "plausible_token": os.getenv("PLAUSIBLE_API_TOKEN"),
-        "plausible_site_id": os.getenv("PLAUSIBLE_SITE_ID"),
     }
     
     missing_vars = []
@@ -37,7 +36,6 @@ def get_db_config():
     if not config["usr"]: missing_vars.append("CLICKHOUSE_USER")
     if not config["pwd"]: missing_vars.append("CLICKHOUSE_PASSWORD")
     if not config["plausible_token"]: missing_vars.append("PLAUSIBLE_API_TOKEN")
-    if not config["plausible_site_id"]: missing_vars.append("PLAUSIBLE_SITE_ID")
     
     if missing_vars:
         raise RuntimeError(f"Faltam variáveis no .env: {', '.join(missing_vars)}")
@@ -144,63 +142,103 @@ def get_plausible_visitors(config, start_date, end_date, site_domain=None):
         print(f"❌ ERRO geral na busca de visitors: {e}")
         return pd.DataFrame()
 
-def get_all_plausible_visitors(config, start_date, end_date):
-    """Busca dados de visitors para todos os domínios."""
-    if start_date == end_date:
-        print(f"📊 Buscando visitors para todos os domínios de {start_date}...")
-    else:
-        print(f"📊 Buscando visitors para todos os domínios...")
+def get_all_sites_from_plausible(config):
+    """Busca todos os sites da conta Plausible."""
+    print("📋 Buscando todos os sites da conta Plausible...")
     
     headers = {
         "Authorization": f"Bearer {config['plausible_token']}",
         "Content-Type": "application/json"
     }
     
-    params = {
-        "site_id": config["plausible_site_id"],
-        "period": "custom", 
-        "date": f"{start_date},{end_date}",
-        "metrics": "visitors,page",
-        "limit": 1000  # Ajustar conforme necessário
-    }
-    
     try:
         response = requests.get(
-            f"{PLAUSIBLE_API_BASE}/stats/breakdown",
+            f"{PLAUSIBLE_API_BASE}/sites",
             headers=headers,
-            params=params,
             timeout=30
         )
         response.raise_for_status()
         
         data = response.json()
-        visitors_data = []
+        sites = []
         
-        for item in data.get("results", []):
-            page = item.get("page", "")
-            if page:
-                # Extrair domínio da página
-                domain = page.split("/")[0] if "/" in page else page
-                visitors_data.append({
-                    "domain": domain,
-                    "visitors": item["visitors"],
-                    "page": page
-                })
+        for site in data:
+            sites.append({
+                "site_id": site["domain"],
+                "domain": site["domain"]
+            })
         
-        df = pd.DataFrame(visitors_data)
-        
-        # Agrupar por domínio
-        df_grouped = df.groupby("domain")["visitors"].sum().reset_index()
-        
-        print(f"✅ Encontrados visitors para {len(df_grouped)} domínios")
-        return df_grouped
+        print(f"✅ Encontrados {len(sites)} sites na conta Plausible")
+        return sites
         
     except requests.exceptions.RequestException as e:
-        print(f"❌ ERRO na API do Plausible (breakdown): {e}")
-        return pd.DataFrame()
-    except Exception as e:
-        print(f"❌ ERRO geral na busca de visitors por domínio: {e}")
-        return pd.DataFrame()
+        print(f"❌ ERRO ao buscar sites do Plausible: {e}")
+        return []
+
+def get_visitors_for_all_sites(config, sites, start_date, end_date):
+    """Busca dados de visitors para todos os sites da conta."""
+    if start_date == end_date:
+        print(f"📊 Buscando visitors para {len(sites)} sites de {start_date}...")
+    else:
+        print(f"📊 Buscando visitors para {len(sites)} sites...")
+    
+    headers = {
+        "Authorization": f"Bearer {config['plausible_token']}",
+        "Content-Type": "application/json"
+    }
+    
+    all_visitors_data = []
+    
+    for i, site in enumerate(sites, 1):
+        site_domain = site["domain"]
+        print(f"   [{i}/{len(sites)}] Processando {site_domain}...")
+        
+        params = {
+            "site_id": site_domain,
+            "period": "custom", 
+            "date": f"{start_date},{end_date}",
+            "metrics": "visitors"
+        }
+        
+        try:
+            response = requests.get(
+                f"{PLAUSIBLE_API_BASE}/stats/timeseries",
+                headers=headers,
+                params=params,
+                timeout=30
+            )
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            # Somar todos os visitors do período
+            total_visitors = sum(item["visitors"] for item in data.get("results", []))
+            
+            all_visitors_data.append({
+                "domain": site_domain,
+                "visitors": total_visitors
+            })
+            
+            # Pequena pausa para não sobrecarregar a API
+            time.sleep(0.1)
+            
+        except requests.exceptions.RequestException as e:
+            print(f"      ⚠️  Erro ao buscar dados de {site_domain}: {e}")
+            # Adicionar com 0 visitors em caso de erro
+            all_visitors_data.append({
+                "domain": site_domain,
+                "visitors": 0
+            })
+        except Exception as e:
+            print(f"      ⚠️  Erro geral para {site_domain}: {e}")
+            all_visitors_data.append({
+                "domain": site_domain,
+                "visitors": 0
+            })
+    
+    df = pd.DataFrame(all_visitors_data)
+    print(f"✅ Processados {len(df)} sites")
+    return df
 
 def cross_data(requests_df, visitors_df):
     """Cruza os dados de requests com visitors."""
@@ -269,8 +307,15 @@ def main():
             print("❌ Nenhum dado de requests encontrado para ontem")
             return 1
         
-        # Buscar dados de visitors
-        visitors_df = get_all_plausible_visitors(config, yesterday, yesterday)
+        # Buscar todos os sites da conta Plausible
+        all_sites = get_all_sites_from_plausible(config)
+        
+        if not all_sites:
+            print("❌ Nenhum site encontrado na conta Plausible")
+            return 1
+        
+        # Buscar dados de visitors para todos os sites
+        visitors_df = get_visitors_for_all_sites(config, all_sites, yesterday, yesterday)
         
         if visitors_df.empty:
             print("❌ Nenhum dado de visitors encontrado para ontem")

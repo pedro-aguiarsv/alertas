@@ -4,9 +4,8 @@ CLICKHOUSE_DATABASE=sua_database
 CLICKHOUSE_USER=seu_usuario
 CLICKHOUSE_PASSWORD=sua_senha
 
-# Configurações do Plausible
+# Configurações do Plausible (apenas o token é necessário)
 PLAUSIBLE_API_TOKEN=seu_token_do_plausible
-PLAUSIBLE_SITE_ID=seu_site_id_do_plausible
 
 # Configurações do Discord (para alertas)
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
