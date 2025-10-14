@@ -232,6 +232,26 @@ def main():
     # DEBUGGING: Vamos executar queries separadas para entender o problema
     print("🔍 DEBUGGING: Analisando dados separadamente...")
     
+    # Query 0: Estrutura da tabela gam_impressions
+    try:
+        schema_sql = f"DESCRIBE {db}.{DB_TABLE_REVENUE}"
+        schema_df = client.query_df(schema_sql)
+        print(f"📋 Estrutura da tabela {DB_TABLE_REVENUE}:")
+        for _, row in schema_df.iterrows():
+            print(f"   - {row['name']}: {row['type']}")
+    except Exception as e:
+        print(f"❌ ERRO ao obter estrutura da tabela {DB_TABLE_REVENUE}: {e}")
+    
+    # Query 0.5: Amostra dos dados da tabela gam_impressions
+    try:
+        sample_sql = f"SELECT * FROM {db}.{DB_TABLE_REVENUE} WHERE toDate(date) = toDate('{yday_sp}') LIMIT 3"
+        sample_df = client.query_df(sample_sql)
+        print(f"📊 Amostra dos dados da tabela {DB_TABLE_REVENUE} (3 linhas):")
+        for col in sample_df.columns:
+            print(f"   - {col}: {sample_df[col].tolist()}")
+    except Exception as e:
+        print(f"❌ ERRO ao obter amostra da tabela {DB_TABLE_REVENUE}: {e}")
+    
     # Query 1: Sites com custo > 0 (independente de revenue)
     debug_cost_sql = f"""
         SELECT 
