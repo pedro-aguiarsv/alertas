@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 import time
 
 # ===== CONFIG =====
-PLAUSIBLE_API_BASE = "https://plausible.io/api/v1"
+PLAUSIBLE_API_BASE = "https://wearenalytics.com/api/v1"
 LOOKBACK_DAYS = 1  # Buscar apenas dados de ontem
 # ==================
 
@@ -142,9 +142,57 @@ def get_plausible_visitors(config, start_date, end_date, site_domain=None):
         print(f"❌ ERRO geral na busca de visitors: {e}")
         return pd.DataFrame()
 
+def detect_plausible_api_version(config):
+    """Detecta a versão correta da API do Plausible."""
+    print("🔍 Detectando versão da API do Plausible...")
+    
+    headers = {
+        "Authorization": f"Bearer {config['plausible_token']}",
+        "Content-Type": "application/json"
+    }
+    
+    # Tentar diferentes URLs possíveis
+    api_urls = [
+        "https://wearenalytics.com/api/v1",
+        "https://wearenalytics.com/api/v2", 
+        "https://plausible.io/api/v1",
+        "https://plausible.io/api/v2"
+    ]
+    
+    for api_url in api_urls:
+        try:
+            print(f"   Testando: {api_url}/sites")
+            response = requests.get(
+                f"{api_url}/sites",
+                headers=headers,
+                timeout=10
+            )
+            
+            if response.status_code == 200:
+                print(f"✅ API encontrada: {api_url}")
+                return api_url
+            elif response.status_code == 404:
+                print(f"   ❌ 404 - URL não encontrada")
+                continue
+            else:
+                print(f"   ⚠️  Status {response.status_code}")
+                continue
+                
+        except requests.exceptions.RequestException as e:
+            print(f"   ❌ Erro: {e}")
+            continue
+    
+    print("❌ Nenhuma API válida encontrada")
+    return None
+
 def get_all_sites_from_plausible(config):
     """Busca todos os sites da conta Plausible."""
     print("📋 Buscando todos os sites da conta Plausible...")
+    
+    # Detectar API correta
+    api_base = detect_plausible_api_version(config)
+    if not api_base:
+        return []
     
     headers = {
         "Authorization": f"Bearer {config['plausible_token']}",
@@ -153,7 +201,7 @@ def get_all_sites_from_plausible(config):
     
     try:
         response = requests.get(
-            f"{PLAUSIBLE_API_BASE}/sites",
+            f"{api_base}/sites",
             headers=headers,
             timeout=30
         )
@@ -175,7 +223,7 @@ def get_all_sites_from_plausible(config):
         print(f"❌ ERRO ao buscar sites do Plausible: {e}")
         return []
 
-def get_visitors_for_all_sites(config, sites, start_date, end_date):
+def get_visitors_for_all_sites(config, sites, start_date, end_date, api_base):
     """Busca dados de visitors para todos os sites da conta."""
     if start_date == end_date:
         print(f"📊 Buscando visitors para {len(sites)} sites de {start_date}...")
@@ -202,7 +250,7 @@ def get_visitors_for_all_sites(config, sites, start_date, end_date):
         
         try:
             response = requests.get(
-                f"{PLAUSIBLE_API_BASE}/stats/timeseries",
+                f"{api_base}/stats/timeseries",
                 headers=headers,
                 params=params,
                 timeout=30
@@ -314,8 +362,14 @@ def main():
             print("❌ Nenhum site encontrado na conta Plausible")
             return 1
         
+        # Detectar API para usar nas próximas chamadas
+        api_base = detect_plausible_api_version(config)
+        if not api_base:
+            print("❌ Não foi possível detectar a API do Plausible")
+            return 1
+        
         # Buscar dados de visitors para todos os sites
-        visitors_df = get_visitors_for_all_sites(config, all_sites, yesterday, yesterday)
+        visitors_df = get_visitors_for_all_sites(config, all_sites, yesterday, yesterday, api_base)
         
         if visitors_df.empty:
             print("❌ Nenhum dado de visitors encontrado para ontem")
