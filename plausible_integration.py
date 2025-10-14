@@ -15,7 +15,7 @@ import time
 
 # ===== CONFIG =====
 PLAUSIBLE_API_BASE = "https://plausible.io/api/v1"
-LOOKBACK_DAYS = 7  # Quantos dias buscar no passado
+LOOKBACK_DAYS = 1  # Buscar apenas dados de ontem
 # ==================
 
 def get_db_config():
@@ -57,7 +57,10 @@ def get_client_db(config):
 
 def get_requests_data(client, db, start_date, end_date):
     """Busca dados de ad_exchange_total_requests do ClickHouse."""
-    print(f"🔍 Buscando dados de requests de {start_date} a {end_date}...")
+    if start_date == end_date:
+        print(f"🔍 Buscando dados de requests de {start_date}...")
+    else:
+        print(f"🔍 Buscando dados de requests de {start_date} a {end_date}...")
     
     # Query para buscar requests por site e data
     query = f"""
@@ -84,7 +87,10 @@ def get_requests_data(client, db, start_date, end_date):
 
 def get_plausible_visitors(config, start_date, end_date, site_domain=None):
     """Busca dados de visitors do Plausible."""
-    print(f"📊 Buscando dados de visitors do Plausible de {start_date} a {end_date}...")
+    if start_date == end_date:
+        print(f"📊 Buscando dados de visitors do Plausible de {start_date}...")
+    else:
+        print(f"📊 Buscando dados de visitors do Plausible de {start_date} a {end_date}...")
     
     headers = {
         "Authorization": f"Bearer {config['plausible_token']}",
@@ -140,7 +146,10 @@ def get_plausible_visitors(config, start_date, end_date, site_domain=None):
 
 def get_all_plausible_visitors(config, start_date, end_date):
     """Busca dados de visitors para todos os domínios."""
-    print(f"📊 Buscando visitors para todos os domínios...")
+    if start_date == end_date:
+        print(f"📊 Buscando visitors para todos os domínios de {start_date}...")
+    else:
+        print(f"📊 Buscando visitors para todos os domínios...")
     
     headers = {
         "Authorization": f"Bearer {config['plausible_token']}",
@@ -248,32 +257,31 @@ def main():
         client = get_client_db(config)
         print("✅ Conectado ao ClickHouse")
         
-        # Definir período
-        end_date = datetime.now().date()
-        start_date = end_date - timedelta(days=LOOKBACK_DAYS)
+        # Definir período (apenas ontem)
+        yesterday = datetime.now().date() - timedelta(days=1)
         
-        print(f"📅 Período: {start_date} a {end_date}")
+        print(f"📅 Analisando dados de: {yesterday} (ontem)")
         
         # Buscar dados de requests
-        requests_df = get_requests_data(client, config["db"], start_date, end_date)
+        requests_df = get_requests_data(client, config["db"], yesterday, yesterday)
         
         if requests_df.empty:
-            print("❌ Nenhum dado de requests encontrado")
+            print("❌ Nenhum dado de requests encontrado para ontem")
             return 1
         
         # Buscar dados de visitors
-        visitors_df = get_all_plausible_visitors(config, start_date, end_date)
+        visitors_df = get_all_plausible_visitors(config, yesterday, yesterday)
         
         if visitors_df.empty:
-            print("❌ Nenhum dado de visitors encontrado")
+            print("❌ Nenhum dado de visitors encontrado para ontem")
             return 1
         
         # Cruzar dados
         merged_df = cross_data(requests_df, visitors_df)
         
         # Salvar resultados
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"requests_vs_visitors_{timestamp}.csv"
+        date_str = yesterday.strftime("%Y%m%d")
+        filename = f"requests_vs_visitors_{date_str}.csv"
         save_results(merged_df, filename)
         
         # Mostrar resumo
