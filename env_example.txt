@@ -1,0 +1,13 @@
+# Configurações do ClickHouse
+CLICKHOUSE_URL=https://seu-servidor.clickhouse.com:8123
+CLICKHOUSE_DATABASE=sua_database
+CLICKHOUSE_USER=seu_usuario
+CLICKHOUSE_PASSWORD=sua_senha
+
+# Configurações do Plausible
+PLAUSIBLE_API_TOKEN=seu_token_do_plausible
+PLAUSIBLE_SITE_ID=seu_site_id_do_plausible
+
+# Configurações do Discord (para alertas)
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+MENTION_IDS=<@123456789>
