@@ -17,6 +17,7 @@ Configure os seguintes secrets no seu repositório GitHub:
 | `CLICKHOUSE_DATABASE` | Nome da database | `sua_database` |
 | `CLICKHOUSE_USER` | Usuário do ClickHouse | `seu_usuario` |
 | `CLICKHOUSE_PASSWORD` | Senha do ClickHouse | `sua_senha` |
+| `PLAUSIBLE_API_TOKEN` | Token da API do Plausible | `seu_token_do_plausible` |
 | `DISCORD_WEBHOOK_URL` | URL do webhook do Discord | `https://discord.com/api/webhooks/...` |
 | `MENTION_IDS` | IDs para mencionar no Discord | `<@123456789> <@987654321>` |
 
@@ -27,21 +28,46 @@ Configure os seguintes secrets no seu repositório GitHub:
 3. Configure o nome e canal
 4. Copie a **URL do Webhook**
 
+### 3. Como obter o Token do Plausible
+
+1. Acesse [Plausible.io](https://plausible.io) e faça login
+2. Vá para **Settings** → **API Keys**
+3. Clique em **"Create API Key"**
+4. Configure o nome e permissões (precisa de **read** para sites e stats)
+5. Copie o **Token** gerado (começa com `eyJ`)
+
 ## 🤖 Workflows Disponíveis
 
-### 1. Alerta Diário (`alerta-diario.yml`)
+### 1. 🚨 Alerta Diário (`alerta-diario.yml`)
 - **Quando executa:** Automaticamente todos os dias às 9:00 AM (horário de Brasília)
 - **O que faz:** 
-  - Executa o script de monitoramento
+  - Executa o script de monitoramento de sites com baixa receita
   - Envia alerta para Discord se encontrar sites problemáticos
   - Salva arquivo CSV como artefato
 
-### 2. Alerta Manual (`alerta-manual.yml`)
+### 2. 🎛️ Alerta Manual (`alerta-manual.yml`)
 - **Quando executa:** Sob demanda (execução manual)
 - **O que faz:**
   - Permite executar o script a qualquer momento
   - Opção de modo de teste (não envia Discord)
-  - Parâmetros customizáveis (futuramente)
+  - Parâmetros customizáveis
+
+### 3. 📊 Análise Completa (`analyze-all-sites.yml`)
+- **Quando executa:** Diariamente às 10:00 AM (horário de Brasília)
+- **O que faz:**
+  - Analisa **TODOS** os sites do ClickHouse
+  - Busca dados de visitors do Plausible
+  - Cruza dados de requests vs visitors
+  - Salva múltiplos arquivos CSV
+
+### 4. 🔍 Análise ClickHouse (`clickhouse-only.yml`)
+- **Quando executa:** Diariamente às 9:00 AM (horário de Brasília)
+- **O que faz:**
+  - Analisa **TODOS** os sites apenas do ClickHouse
+  - Não depende do Plausible
+  - Backup caso a integração Plausible falhe
+
+> 📖 **Documentação completa:** Veja [WORKFLOWS_README.md](WORKFLOWS_README.md) para detalhes dos workflows
 
 ## 🚀 Como Usar
 

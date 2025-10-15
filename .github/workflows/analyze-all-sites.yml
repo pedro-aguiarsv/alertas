@@ -1,0 +1,101 @@
+name: Análise Diária - Todos os Sites (ClickHouse + Plausible)
+
+on:
+  schedule:
+    # Executa todos os dias às 10:00 AM (horário de Brasília = UTC-3, então 13:00 UTC)
+    - cron: '0 13 * * *'
+  workflow_dispatch:  # Permite execução manual
+
+jobs:
+  analyze-all-sites:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout código
+      uses: actions/checkout@v4
+      
+    - name: Configurar Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        
+    - name: Cache dependências
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+          
+    - name: Instalar dependências
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        
+    - name: Criar arquivo .env
+      run: |
+        echo "CLICKHOUSE_URL=${{ secrets.CLICKHOUSE_URL }}" >> .env
+        echo "CLICKHOUSE_DATABASE=${{ secrets.CLICKHOUSE_DATABASE }}" >> .env
+        echo "CLICKHOUSE_USER=${{ secrets.CLICKHOUSE_USER }}" >> .env
+        echo "CLICKHOUSE_PASSWORD=${{ secrets.CLICKHOUSE_PASSWORD }}" >> .env
+        echo "PLAUSIBLE_API_TOKEN=${{ secrets.PLAUSIBLE_API_TOKEN }}" >> .env
+        echo "DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" >> .env
+        echo "MENTION_IDS=${{ secrets.MENTION_IDS }}" >> .env
+        
+    - name: Analisar todos os sites do ClickHouse
+      run: |
+        echo "🚀 Iniciando análise de todos os sites..."
+        python3 analyze_all_sites.py
+        
+    - name: Listar sites e visitors do Plausible
+      run: |
+        echo "📊 Buscando dados do Plausible..."
+        python3 list_plausible_visitors_yesterday.py
+      continue-on-error: true  # Continua mesmo se falhar (token pode estar inválido)
+        
+    - name: Cruzar dados ClickHouse + Plausible
+      run: |
+        echo "🔄 Tentando cruzar dados..."
+        python3 plausible_integration.py
+      continue-on-error: true  # Continua mesmo se falhar
+        
+    - name: Upload arquivos CSV gerados
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: analise-sites-${{ github.run_number }}
+        path: |
+          all_sites_requests_*.csv
+          plausible_visitors_*.csv
+          requests_vs_visitors_*.csv
+        retention-days: 30
+        
+    - name: Resumo da execução
+      if: always()
+      run: |
+        echo "## 📊 Resumo da Análise Diária" >> $GITHUB_STEP_SUMMARY
+        echo "- **Data/Hora:** $(date)" >> $GITHUB_STEP_SUMMARY
+        echo "- **Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        # Verificar arquivos gerados
+        if [ -f "all_sites_requests_*.csv" ]; then
+          echo "✅ **ClickHouse:** Dados de requests analisados" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "❌ **ClickHouse:** Falha na análise de requests" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ -f "plausible_visitors_*.csv" ]; then
+          echo "✅ **Plausible:** Dados de visitors coletados" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "⚠️  **Plausible:** Não foi possível coletar dados (verificar token)" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ -f "requests_vs_visitors_*.csv" ]; then
+          echo "✅ **Integração:** Dados cruzados com sucesso" >> $GITHUB_STEP_SUMMARY
+        else
+          echo "⚠️  **Integração:** Não foi possível cruzar dados" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        echo "" >> $GITHUB_STEP_SUMMARY
+        echo "📁 **Artefatos disponíveis:** Ver seção 'Artifacts' abaixo" >> $GITHUB_STEP_SUMMARY
